@@ -9,8 +9,6 @@
 
 ;; TODO: understand the meaning of \\ at end of line
 
-;; TODO: be case insensitive for #+BEGIN_
-
 ;; TODO: treat the following forms:
 ;; macro {{{stuff}}} http://orgmode.org/org.html#Macro-replacement
 ;; http://orgmode.org/org.html#Subscripts-and-superscripts
@@ -38,7 +36,7 @@
     (cond [(eq? eof line) eof]
           [(regexp-match? re line) result]
           [else (read-until-line re in (string-append result line))]))
-  (define text (read-until-line (string-append "^ *#[+]END_" type " *$") in))
+  (define text (read-until-line (string-append "^ *#[+](?i:END)_" type " *$") in))
   (when (eq? eof text)
     (raise-user-error "Impossible to find end for ~a started at ~a:~a"
                       (string-append "#+BEGIN_" type)
@@ -236,7 +234,7 @@
   (match line
     [(regexp "^[*]+ ") (decode-header line in position)]
     [(regexp "^[ ]*[|]") (decode-table line in position)]
-    [(regexp "^( *)#+BEGIN_([A-Z]+)[ ]?(.*)" (list _ indentation type lang))
+    [(regexp "^( *)#[+](?i:BEGIN)_([A-Za-z]+)[ ]?(.*)" (list _ indentation type lang))
      (decode-block (string->number indentation) type lang in position)]
     [(regexp "^( *):PROPERTIES:" (list _ indentation))
      (decode-properties (string-length indentation) in position)]
@@ -481,3 +479,17 @@
            (display column out)
            (display "|" out))
          (display #\newline out)))]))
+
+(module+ test
+  (let ([block #<<ORGCODE
+#+BEGIN_SRC racket
+(+ 1 1)
+#+END_SRC
+
+#+begin_src racket
+(+ 1 1)
+#+end_src
+ORGCODE
+               ])
+    (check-match (read-org (open-input-string block))
+                 (list (? node:block?) _ (? node:block?)))))
