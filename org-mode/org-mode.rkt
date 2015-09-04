@@ -17,18 +17,71 @@
 ;; date http://orgmode.org/org.html#Dates-and-Times
 ;; latex snippet
 
-;; TODO: apply emphasis on text
-;;
-;; They must be preceed and followed by space or newline. But super/sub script
-;; should not.  par contre les supper script ne doivent pas être précéder d'un
-;; blank
-(define line-throught-re #rx"[+](?=[^ ]).*[^ ][+]")
-(define verbatim-re #rx"[=](?=[^ ]).*[^ ][=]")
-(define underline-re #rx"[_](?=[^ ]).*[^ ][_]")
-(define bold-re #rx"[*](?=[^ ]).*[^ ][*]")
-(define italic-re #rx"[/](?=[^ ]).*[^ ][/]")
-(define code-re #rx"[~](?=[^ ]).*[^ ][~]")
+;; TODO: implement super and subscript check them after the apply-emphasis
+;; simple [a-z0-9A-Z]_[a-z0-9A-Z] subscript and super with ^ (take into account
+;; recursive sub/super script)
 
+;; TODO: emphasis not remove the \ in \~ for instance.
+(define (apply-emphasis text)
+  (define line-throught-re "[+](?=[^ ])([^+]|[\\][+])*[^ ][+]")
+  (define verbatim-re "[=](?=[^ ])([^=]|[\\][=])*[^ ][=]")
+  (define underline-re "[_](?=[^ ])([^_]|[\\][_])*[^ ][_]")
+  (define bold-re "[*](?=[^ ])([^*]|[\\][*])*[^ ][*]")
+  (define italic-re "[/](?=[^ ])([^/]|[\\][/])*[^ ][/]")
+  (define code-re "[~](?=[^ ])([^~]|[\\][~])*[^ ][~]")
+  (define re (regexp
+              (string-append
+               "(" line-throught-re ")|("
+               verbatim-re ")|("
+               underline-re ")|("
+               bold-re ")|("
+               italic-re ")|("
+               code-re ")")))
+  (let loop ([current-pos 0]
+             [pos (regexp-match-positions* re text)]
+             [result '()])
+    (cond [(empty? pos)
+           (let loop ([result '()]
+                      [lst (cons
+                            (substring text current-pos)
+                            result)])
+             (cond [(empty? lst) result]
+                   [(and (not (empty? result))
+                         (string? (first result))
+                         (string? (first lst)))
+                    (loop (cons
+                           (string-append (first lst) (first result))
+                           (rest result))
+                          (rest lst))]
+                   [else (loop (cons (first lst) result) (rest lst))]))]
+          [(current-pos . < . (caar pos))
+           (loop
+            (caar pos)
+            pos
+            (cons (substring text current-pos (caar pos)) result))]
+          [else
+           (loop
+            (cdar pos)
+            (cdr pos)
+            (cons
+             (if (or (= 0 (caar pos)) (eq? #\space (string-ref text (sub1 (caar pos)))))
+                 (node:emphasis
+                  ;; TODO: implement that
+                  (node:position #f #f #f #f #f #f)
+                  (case (string-ref text (caar pos))
+                    [(#\~) 'code]
+                    [(#\+) 'line-throught]
+                    [(#\=) 'verbatim]
+                    [(#\_) 'underline]
+                    [(#\*) 'bold]
+                    [(#\/) 'italic])
+                  (substring text (add1 (caar pos)) (sub1 (cdar pos))))
+                 (substring text (caar pos) (cdar pos)))
+             result))])))
+
+(module+ test
+  (let ([text "a=some= ~test\\~ code~ mama"])
+    (check-match (apply-emphasis text) (list "a=some= " (node:emphasis _ 'code "test\\~ code") " mama"))))
 
 (define (decode-block indentation type lang in position)
   (define (read-until-line re in [result ""])
@@ -283,7 +336,7 @@
                         (node:position-end-line end)
                         (node:position-end-column end)
                         (node:position-end-offset end)))
-       (reverse (map car texts))))]
+       (reverse (map apply-emphasis (map car texts)))))]
     [else stack]))
 
 (define (end-indentation stack indentation)
@@ -451,8 +504,29 @@
        (display #\newline out))]
     [(struct node:paragraph [position texts])
      (for ([text texts])
-       (display text out)
-       (display #\newline out))]
+       (if (string? text)
+           (begin
+             (display text out)
+             (display #\newline out))
+           (let loop ([lst text]
+                      [result ""])
+             (cond [(empty? lst) result]
+                   [(string? (first lst)) (loop (rest lst) (append result (first lst)))]
+                   [(node:emphasis? (first lst))
+                    (loop (rest lst)
+                          (let* ([emp (first lst)]
+                                 [char (case (node:emphasis-type emp)
+                                         [(line-throught) "+"]
+                                         [(verbatim) "="]
+                                         [(underline) "_"]
+                                         [(bold) "*"]
+                                         [(italic) "/"]
+                                         [(code) "~"])])
+                            (append result
+                                    char
+                                    (node:emphasis-text emp)
+                                    char)))]
+                   [else (raise-user-error "Text should be composed of string or emphase")]))))]
     [(struct node:plain-list [position indentation type text checkbox cookie children])
      (let ([space (make-string indentation #\space)])
        (display space out)
@@ -492,4 +566,18 @@
 ORGCODE
                ])
     (check-match (read-org (open-input-string block))
-                 (list (? node:block?) _ (? node:block?)))))
+                 (list (? node:block?) _ (? node:block?))))
+  (let ([emphasis #<<ORGCODE
+some text _italic_
+some ~code~
+yep more *bold*
+ORGCODE
+        ])
+(check-match
+ (read-org (open-input-string emphasis))
+ (list (node:paragraph
+        _
+        (list
+         (list "some text " (node:emphasis _ 'underline "italic") "")
+         (list "some " (node:emphasis _ 'code "code") "")
+         (list "yep more " (node:emphasis _ 'bold "bold") "")))))))

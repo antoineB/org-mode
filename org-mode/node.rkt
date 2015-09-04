@@ -11,7 +11,9 @@
  (struct-out properties)
  (struct-out table)
  (struct-out paragraph)
- (struct-out block))
+ (struct-out block)
+ (struct-out emphasis)
+ emphasis-list)
 
 (struct position [start-line start-column start-offset end-line end-column end-offset] #:transparent)
 
@@ -36,3 +38,13 @@
 (struct table [position indentation rows] #:transparent)
 
 (struct paragraph [position texts] #:transparent)
+
+(define emphasis-list
+  '(line-throught
+    verbatim
+    underline
+    bold
+    italic
+    code))
+
+(struct emphasis [position type text] #:transparent)
