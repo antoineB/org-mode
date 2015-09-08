@@ -7,6 +7,10 @@
 (module+ test
   (require rackunit))
 
+;; draft format: http://orgmode.org/worg/dev/org-syntax.html
+
+;; TODO: add the snippet format: @@html:text@@
+
 ;; TODO: understand the meaning of \\ at end of line
 
 ;; TODO: treat the following forms:
@@ -17,11 +21,16 @@
 ;; date http://orgmode.org/org.html#Dates-and-Times
 ;; latex snippet
 
+;; TODO: support for directive (affiliated keyword) seems errorneous
+
 ;; TODO: implement super and subscript check them after the apply-emphasis
 ;; simple [a-z0-9A-Z]_[a-z0-9A-Z] subscript and super with ^ (take into account
 ;; recursive sub/super script)
 
 ;; TODO: emphasis not remove the \ in \~ for instance.
+;;
+;; TODO: actualy emphasis are errorneous, not only whitespace is allowed before
+;; and after.
 (define (apply-emphasis text)
   (define line-throught-re "[+](?=[^ ])([^+]|[\\][+])*[^ ][+]")
   (define verbatim-re "[=](?=[^ ])([^=]|[\\][=])*[^ ][=]")
@@ -123,6 +132,7 @@
   (check-true (regexp-match? (current-date-format) "2015-06-06")))
 
 
+;; TODO: don't take into ARCHIVE
 (define (decode-header line in position)
   (define line-in (open-input-string line))
   (define level (string-length (bytes->string/utf-8 (second (regexp-match #rx"^([*]+) " line-in)))))
@@ -296,7 +306,7 @@
     ;; [(regexp "^[ ]*#+END_[A-Z]+") 'block-end]
     ;; [(regexp "^[ ]*:END:") 'properties-end]
     ;; [(regexp "^[ ]*:[a-zA-Z_0-9-]:") 'property]
-    [(regexp "^( *)(-|[+]|[0-9]+[.]) (\\[[ X-]\\])?(.*)" (list _ indentation type checkbox text))
+    [(regexp "^( *)(-|[+]|[0-9]+[.)]) ?(\\[[ X-]\\])?(.*)" (list _ indentation type checkbox text))
      (node:plain-list position
                     (string-length indentation)
                     (case type
@@ -580,4 +590,24 @@ ORGCODE
         (list
          (list "some text " (node:emphasis _ 'underline "italic") "")
          (list "some " (node:emphasis _ 'code "code") "")
-         (list "yep more " (node:emphasis _ 'bold "bold") "")))))))
+         (list "yep more " (node:emphasis _ 'bold "bold") ""))))))
+  (let ([plain-list #<<ORGCODE
+  1) a
+  2) b
+ORGCODE
+       ])
+(check-match
+ (read-org (open-input-string plain-list))
+ (list
+  (node:plain-list _ 2 1 "a" #f #f '())
+  (node:plain-list _ 2 2 "b" #f #f '()))))
+  (let ([plain-list #<<ORGCODE
+1.
+ toto
+2.
+ tutu
+ORGCODE
+       ])
+(check-match
+ (read-org (open-input-string plain-list))
+ (list (? node:plain-list?) (? node:plain-list?)))))
