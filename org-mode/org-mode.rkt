@@ -97,7 +97,7 @@
     (define line (read-line in))
     (cond [(eq? eof line) eof]
           [(regexp-match? re line) result]
-          [else (read-until-line re in (string-append result line))]))
+          [else (read-until-line re in (string-append result line "\n"))]))
   (define text (read-until-line (string-append "^ *#[+](?i:END)_" type " *$") in))
   (when (eq? eof text)
     (raise-user-error "Impossible to find end for ~a started at ~a:~a"
@@ -298,7 +298,7 @@
     [(regexp "^[*]+ ") (decode-header line in position)]
     [(regexp "^[ ]*[|]") (decode-table line in position)]
     [(regexp "^( *)#[+](?i:BEGIN)_([A-Za-z]+)[ ]?(.*)" (list _ indentation type lang))
-     (decode-block (string->number indentation) type lang in position)]
+     (decode-block (string-length indentation) type lang in position)]
     [(regexp "^( *):PROPERTIES:" (list _ indentation))
      (decode-properties (string-length indentation) in position)]
     [(regexp "^( *)#[+]([A-Z]+):(.*)" (list _ indentation name text))
