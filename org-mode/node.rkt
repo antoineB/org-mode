@@ -20,6 +20,7 @@
  (struct-out inline-babel)
  (struct-out inline-block)
  (struct-out link)
+ (struct-out angular-link)
  (struct-out line-break)
  (struct-out target)
  (struct-out radio-target)
@@ -79,6 +80,8 @@
 (struct inline-block object [text] #:transparent)
 
 (struct link object [link description] #:transparent)
+
+(struct angular-link object [text] #:transparent)
 
 (struct line-break object [text] #:transparent)
 

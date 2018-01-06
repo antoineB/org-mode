@@ -122,7 +122,7 @@
     (define-values (before script after) (inner str))
     (if (not before)
         (reverse (cons str result))
-        (let ([script (match (regexp-match #rx"^([^^_]+)([_^])[{(]?(.+?)[})]?$" script)
+        (let ([script (match (regexp-match #rx"^([^^_]+)([_^])([{(]?(?:.+?)[})])?$" script)
                         [(list _ name "^" data)
                          (node:super-script name (extract-data* data))]
                         [(list _ name "_" data)
@@ -693,7 +693,7 @@
 
 (define (extract-angular-link* str)
   (define positions (regexp-match-positions* (string-append "<" (string-join (map escape-regexp (current-org-link-types)) "|") ":[^]<>\r\n]+>") str))
-  (extract-simple* node:link positions str))
+  (extract-simple* node:angular-link positions str))
 
 (define WORD-CONSTITUANT-RE "\\w")
 
@@ -1173,78 +1173,121 @@
        (substring line (add1 (current-indentation)))]
     [else (substring line (current-indentation))]))
 
-(define (write-org org-struct out extra-indentation)
-  (define (unless-empty test data)
-    (write
-     (if test (string-append data " ") "")
-     out))
-  (match org-struct
-    [(struct node:header [position level comment priority tags text status cookie children])
-     (display (string-append (make-string level #\*) " ") out)
-     (unless comment "COMMENT ")
-     (unless status (string-append status " "))
-     ;;(if priority
-     (display text out)
-     ;; cookie
-     ;; tags
-     (display #\newline out)
-     (for ([child children])
-       (write-org child out 0))]
-    [(struct node:comment [position indentation text])
-     (display (make-string indentation #\space) out)
-     (display "#" out)
-     (display text out)
-     (display #\newline out)]
-    [(struct node:block [position type lang text])
-     (let ([space (make-string (+ 2 (current-indentation)) #\space)])
-       (display space out)
-       (display (format "#+BEGIN_~a ~a" type lang) out)
+(define (display* out . elems)
+  (for ([elem elems])
+    (display elem out)))
+
+(define (display-objects objects out)
+  (for ([object objects])
+    (match object
+      [(struct node:markup [border text]) (display border out)
+                                          (display-objects text out)
+                                          (display border out)]
+      [(struct node:macro [text]) (display* out "{{{" text "}}}")]
+      [(struct node:date [text]) (display text out)]
+      [(struct node:snippet [text]) (display text out)]
+      [(struct node:line-break [text]) (display text out)]
+      [(struct node:target [text]) (display text out)]
+      [(struct node:inline-babel [text]) (display text out)]
+      [(struct node:inline-block [text]) (display text out)]
+      [(struct node:entity [text]) (display text out)]
+      [(struct node:latex-fragment [text]) (display text out)]
+      [(struct node:footnote [label description]) (display* out "[fn:" label ":")
+                                                  (display-objects description out)
+                                                  (display "]" out)]
+      [(struct node:angular-link [text]) (display text out)]
+      [(struct node:radio-target [text]) (display text out)]
+      [(struct node:link [link description]) (display* out "[[" link "]")
+                                             (when description
+                                               (display "[" out)
+                                               (display-objects description out)
+                                               (display "]" out))
+                                             (display "]" out)]
+      [(struct node:radio-target [text]) (display "<<<" out)
+                                         (display-objects text)
+                                         (display ">>>")]
+      [(struct node:sub-script [name text]) (display* out name "_")
+                                            (if (string? text)
+                                                (display text out)
+                                                (display-objects text out))]
+      [(struct node:super-script [name text]) (display* out name "^")
+                                              (if (string? text)
+                                                  (display text out)
+                                                  (display-objects text out))]
+      [(? string?) (display object out)])))
+
+
+(define (display-whitespace nb out)
+  (display (make-string nb  #\space) out))
+
+(define (write-org org-struct out [extra-indentation 0])
+  (for ([elem org-struct])
+    (match elem
+      [(struct node:header [position level comment priority tags text status cookie children])
+       (display* out (make-string level #\*) " ")
+       (and status (display*  out status " "))
+       (and priority (display* out "[#" priority "] "))
+       (and comment (display "COMMENT " out))
+       (display-objects text out)
+       (and cookie (display* out "[" cookie "]"))
+       (and tags (display (string-join tags ":" #:before-first ":" #:after-last ":") out))
        (display #\newline out)
-       (display text out)
-       (display #\newline out)
-       (display space out)
-       (display (format "#+END_~a" type) out)
-       (display #\newline out))]
-    [(struct node:special [position indentation name text])
-     (display (make-string (+ extra-indentation indentation) #\space) out)
-     (display name out)
-     (display ": " out)
-     (display text out)
-     (display #\newline out)]
-    [(struct node:keyword [position indentation name text])
-     (display (make-string indentation #\space) out)
-     (display "#+" out)
-     (display name out)
-     (display ": " out)
-     (display text out)
-     (display #\newline out)]
-    [(struct node:properties [position indentation properties])
-     (let ([space (make-string (+ extra-indentation indentation) #\space)])
-       (display space out)
-       (display ":PROPERTIES:" out)
-       (display #\newline out)
+       (write-org children out 0)]
+      [(struct node:comment [position indentation text])
+       (display-whitespace indentation out)
+       (display* out "#" text "\n")]
+      [(struct node:block [position type lang text])
+       (display-whitespace (+ 2 extra-indentation) out)
+       (display* out (format "#+BEGIN_~a ~a" type lang)
+                 "\n"
+                 text
+                 "\n")
+       (display-whitespace (+ 2 extra-indentation) out)
+       (display* out (format "#+END_~a" type) "\n")]
+      [(struct node:special [position indentation name text])
+       (display-whitespace (+ extra-indentation indentation) out)
+       (display* out name ": " text "\n")]
+      [(struct node:keyword [position indentation name text])
+       (display-whitespace indentation out)
+       (display* out "#+" name ": " text "\n")]
+      [(struct node:properties [position indentation properties])
+       (display-whitespace (+ extra-indentation indentation) out)
+       (display ":PROPERTIES:\n" out)
        (for ([prop properties])
          (display (format ":~a: ~a"
-                        (node:property-name prop)
-                        (node:property-text prop))
-                out)
+                          (node:property-name prop)
+                          (node:property-text prop))
+                  out)
          (display #\newline out))
-       (display space out)
-       (display ":END:" out)
-       (display #\newline out))]
-    [(struct node:paragraph [position texts])
-     (for ([text texts])
-       (if (string? text)
-           (begin
-             (display text out)
-             (display #\newline out))
-           (let loop ([lst text]
-                      [result ""])
-             (cond [(empty? lst) result]
-                   [(string? (first lst)) (loop (rest lst) (append result (first lst)))]
-                   [else (raise-user-error "Text should be composed of string or emphase")]))))]
-    [(struct node:plain-list [position indentation type checkbox cookie tag children])
-     (parameterize ([current-indentation indentation])
+       (display-whitespace (+ extra-indentation indentation) out)
+       (display ":END:\n" out)]
+      [(struct node:horizontal-rule [position text])
+       (display-whitespace extra-indentation out)
+       (display text out)]
+      [(struct node:dynamic-block [position name params text])
+       (display-whitespace extra-indentation out)
+       (display* out "#+BEGIN: " name " " params "\n")
+       (display text out)
+       (display-whitespace extra-indentation out)
+       (display "#+END:\n")]
+      [(struct node:fixed-width [position text])
+       (display-whitespace extra-indentation out)
+       (display* out ":" text)]
+      [(struct node:latex [position name text])
+       (display-whitespace extra-indentation out)
+       (display* out "\\begin{" name "}\n")
+       (display text out)
+       (display* out "\\end{" name "}\n")]
+      [(struct node:table [position indentation rows])
+       (let ([space (make-string (+ extra-indentation indentation) #\space)])
+         (for ([row rows])
+           (display space out)
+           (display "|" out)
+           (for ([column row])
+             (display-objects column out)
+             (display "|" out))
+           (display #\newline out)))]
+      [(struct node:plain-list [position indentation type checkbox cookie tag children])
        (let ([space (make-string indentation #\space)])
          (display space out)
          (display
@@ -1254,21 +1297,19 @@
             [(minus) "- "]
             [else (string-append (number->string type) ". ")])
           out)
-         ;; checkbox
-         ;; cookie
-         (display #\newline out)
-         (for ([child children])
-           (write-org child out indentation)
-           #;(display #\newline out))))]
-    [(struct node:table [position indentation rows])
-     (let ([space (make-string (+ extra-indentation indentation) #\space)])
-       (for ([row rows])
-         (display space out)
-         (display "|" out)
-         (for ([column row])
-           (display column out)
-           (display "|" out))
-         (display #\newline out)))]))
+         (and checkbox (display* out checkbox))
+         (and cookie (display* out "[" cookie "] "))
+         (write-org children out indentation))]
+      [(struct node:paragraph [position texts])
+       (display-objects
+        (map (lambda (str)
+               (if (string? str)
+                   (string-replace str "\n" (string-append "\n" (make-string (+ 2 extra-indentation) #\space)))
+                   str))
+             texts)
+        out)
+       (display "\n" out)])))
+
 
 (module+ test
   (let ([block #<<ORGCODE
@@ -1283,17 +1324,6 @@ ORGCODE
                ])
     (check-match (read-org (open-input-string block))
                  (list (? node:block?) _ (? node:block?))))
-  ;; (let ([emphasis #<<ORGCODE
-;; some text _italic_
-;; some ~code~
-;; yep more *bold*
-;; ORGCODE
-;;         ])
-;; (check-match
-;;  (read-org (open-input-string emphasis))
-;;  (list (node:paragraph _ (list "some text " (node:emphasis _ 'underline "italic") ""))
-;;        (node:paragraph _ (list "some " (node:emphasis _ 'code "code") ""))
-;;        (node:paragraph _ (list "yep more " (node:emphasis _ 'bold "bold") "")))))
 (let ([plain-list #<<ORGCODE
   1) a
   2) b
